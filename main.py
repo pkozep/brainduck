@@ -1,214 +1,226 @@
 import re
-import random
 
 class BrainDuck:
     def __init__( self ):
-        self.params = []
-        self.code = ''
-
-    # Compiler params management methods
-    def add_param( self, name, tp ):
-        for i in range( len( self.params ) ):
-            if self.params[ i ][ 1 ] == None:
-                self.params[ i ] = [ name, tp ]
-                break
-        else:
-            self.params.append( [ name, tp ] )
-
-    def add_array( self, name, tp_and_size ):
-        tp, size = tp_and_size[:-1].split( '[' )
-        max_free_size = 0
-        start_ind = 0
-        for i in range( len( self.params ) ):
-            if self.params[ i ][ 1 ] == None:
-                max_free_size += 1
+        self.variables = []
+        self.code = ""
+        self.last_gen_name = 0
+    
+    def create_variable( self, name: str, size: int = 1 ) -> list[int]:
+        free_start, free_count = -1, 0
+        for i, isOccupied in enumerate( self.variables ):
+            if not isOccupied:
+                free_count += 1
+                if free_count == size:
+                    free_start = i - size + 1
+                    break
             else:
-                max_free_size = 0
-                start_ind = i + 1
-            if max_free_size == int( size ):
-                break
-        else:
-            for i in range( int( size ) ):
-                self.params.append( [ name, tp_and_size ] )
-            return True
+                free_count = 0
         
-        for i in range( len( self.params ) ):
-            if i >= start_ind and i < start_ind + int( size ):
-                self.params[ i ] = [ name, tp ]
+        if free_start == -1:
+            free_start = len( self.variables )
+            self.variables.extend( [False] * size )
+        for i in range( free_start, free_start + size ):
+            self.variables[i] = name
 
+        return [ i * 2 for i, var in enumerate( self.variables ) if var == name ]
 
-    def get_param( self, name ):
-        for i in range( len( self.params ) ):
-            if self.params[ i ][ 0 ] == name:
-                return i * 2
+    def get_variable_index( self, name: str ) -> list[int]:
+        return [ i * 2 for i, var in enumerate( self.variables ) if var == name ]
+
+    def del_variable( self, name: str ) -> None:
+        for i, var in enumerate( self.variables ):
+            if var == name:
+                self.variables[i] = False
+                self.set_cursor( i * 2 )
+                self.clear_value()
+
+    def gen_name( self ):
+        self.last_gen_name += 1
+        return 'gen_' + str( self.last_gen_name ).zfill( 8 )
     
-    def del_param( self, name ):
-        for i in range( len( self.params ) ):
-            if self.params[ i ][ 0 ] == name:
-                self.params[ i ][ 1 ] = None
-                self.clear_value( i*2 )
+    def render_fragment( self, fragment: str ) -> list:
+        commands = []
+        word = ""
+        brace_count = 0
+        for char in fragment:
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+            elif char == ';' and brace_count == 0 and word:
+                commands.append(word)
+                word = ""
+                continue
+            word += char
+        return commands
     
-    # Executing the command
-    def execution( self, command ):
-        print( command )
-        if re.fullmatch( r"^(int|char) [a-zA-Z_][a-zA-Z0-9_]*;$", command ):
-            # int a;  # char a;
-            tp, name = command[:-1].split()
-            self.add_param( name, tp )
-        elif re.fullmatch( r"^(int|char) [a-zA-Z_][a-zA-Z0-9_]*\[\d+\];$", command ):
-            # int a[10];  # char a[10];
-            tp, name_and_size = command[:-1].split()
-            name, size = name_and_size[:-1].split( '[' )
-            self.add_array( name, tp + f"[{ size }]" )
-        elif re.fullmatch( r"^(int|char) [a-zA-Z_][a-zA-Z0-9_]* = (.*);$", command ):
-            # int a = ...;  # char a = ...;
-            tp_and_name, expression = command[:-1].split( ' = ' )
-            tp, name = tp_and_name.split()
-            self.execution( f"{ tp } { name };" )
-            self.execution( f"{ name } = { expression };" )
-        elif re.fullmatch( r"^int [a-zA-Z_][a-zA-Z0-9_]*\[\d+\] = \{(\d+(?:, \d+)*)\};$", command ):
-            # int a[12] = {...};
-            tp_and_name, expression = command[:-1].split( ' = ' )
-            tp, name_and_size = tp_and_name.split()
-            name, size = name_and_size[:-1].split( '[' )
-            self.execution( f"{ tp } { name_and_size };" )
-            for i in range( len( expression[1:-1].split( ', ' ) ) ):
-                self.execution( f"{ name }[{ i }] = { expression[1:-1].split( ', ' )[ i ] };" )
-        elif re.fullmatch( r"^char [a-zA-Z_][a-zA-Z0-9_]*\[\d+\] = (.*);$", command ):
-            # char a[12] = "...";
-            tp_and_name, expression = command[:-1].split( ' = ' )
-            tp, name_and_size = tp_and_name.split()
-            name, size = name_and_size[:-1].split( '[' )
-            self.execution( f"{ tp } { name_and_size };" )
-            for i in range( 1, len( expression ) - 1 ):
-                self.execution( f"{ name }[{ i - 1 }] = '{ expression[ i ] }';" )
-        elif re.fullmatch( r"^[a-zA-Z_][a-zA-Z0-9_]* = (.*);$", command ):
-            # a = ...;
-            name, expression = command[:-1].split( ' = ' )
-            if re.fullmatch( r"^[a-zA-Z_][a-zA-Z0-9_]* = \d+;$", command ):
-                # a = 123;
-                self.set_value( self.get_param( name ), int( expression ) )
-            elif re.fullmatch( r"^[a-zA-Z_][a-zA-Z0-9_]* = \'[ -~]\';$", command ):
-                # a = 'A';
-                self.set_value( self.get_param( name ), ord( expression[1] ) )
-            elif re.fullmatch( r"^[a-zA-Z_][a-zA-Z0-9_]* = [a-zA-Z_][a-zA-Z0-9_]*;$", command ):
-                # a = b;
-                self.copy( self.get_param( expression ), self.get_param( name ) )
-            elif re.fullmatch( r"^[a-zA-Z_][a-zA-Z0-9_]* = [a-zA-Z_][a-zA-Z0-9_]*\[\d+\];$", command ):
-                # a = b[3];
-                name_param, index_param = expression[:-1].split( '[' )
-                self.copy( self.get_param( name_param ) + int( index_param )*2, self.get_param( name ) )
-            elif re.fullmatch( r"^[a-zA-Z_][a-zA-Z0-9_]* = [-]* \d+ [\+\-\*\\] \d+( [\+\-\*\\] \d+)*$", command ):
-                # a = . + . - . * . \ .;
-                if expression[0] != '-':
-                    expression = ' + ' + expression
-                else:
-                    expression = ' ' + expression
-                params = expression.split( ' + ' )
-                buff = BrainDuck.gen_name()
-                self.execution( f"int { buff };" )
-                self.execution( f"{ buff } += { params[0] };" )
-                self.execution( f"{ buff } += { params[1] };" ) 
-                self.copy( self.get_param( buff ), self.get_param( name ) )
-                self.del_param( buff )
-        elif re.fullmatch( r"^[a-zA-Z_][a-zA-Z0-9_]*\[\d+\] = (.*);$", command ):
-            # a[3] = ...;
-            name, expression = command[:-1].split( ' = ' )
-            name, index = name[:-1].split( '[' )
-            buff = BrainDuck.gen_name()
-            self.execution( f"{ buff} = { expression };" )
-            self.copy( self.get_param( buff ), self.get_param( name ) + int( index )*2 )
-            self.del_param( buff )
-        elif re.fullmatch( r"^[a-zA-Z_][a-zA-Z0-9_]* \+= (.*);$", command ):
-            # a += ...;
-            name, expression = command[:-1].split( ' += ' )
-            buff = BrainDuck.gen_name()
-            self.execution( f"int { buff} = { expression };" )
-            self.copy( self.get_param( buff ), self.get_param( name ) )
-            self.del_param( buff )
-        elif re.fullmatch( r"^[a-zA-Z_][a-zA-Z0-9_]* \-= (.*);$", command ):
-            # a -= ...;
-            name, expression = command[:-1].split( ' -= ' )
-            buff = BrainDuck.gen_name()
-            self.execution( f"int { buff} = { expression };" )
-            self.copy( self.get_param( buff ), self.get_param( name ), False )
-            self.del_param( buff )
-        elif re.fullmatch( r"^[a-zA-Z_][a-zA-Z0-9_]* \*= (.*);$", command ):
-            # a *= ...;
-            name, expression = command[:-1].split( ' *= ' )
-            buff = BrainDuck.gen_name()
-            self.execution( f"int { buff} = { expression };" )
-            # wait
-            self.del_param( buff )
-        elif re.fullmatch( r"^[a-zA-Z_][a-zA-Z0-9_]* \\= (.*);$", command ):
-            # a \= ...;
-            name, expression = command[:-1].split( ' \\= ' )
-            buff = BrainDuck.gen_name()
-            self.execution( f"int { buff} = { expression };" )
-            # wait
-            self.del_param( buff )
+    ### execution the command
+    def render( self, code ):
+        clean_code = code[1:-2].replace( '  ', '' ).replace( '\n', '' )
+        commands = self.render_fragment( clean_code )
+        print( commands )
+        for command in commands:
+            self.execution(command)
+
+    def execution( self, command, indent: int = 0 ):
+        print( '    ' * indent, command )
+        def parse_name_and_index( expr ):
+            match = re.match( r'(\w+)(?:\[(\d+)\])?', expr )
+            name, index = match.groups()
+            return name, int( index )
+
+        def handle_simple_assignment( var_ind: list[int], expression: str ) -> None:
+            print('fff',expression, var_ind)
+            self.set_cursor( var_ind[0] )
+            if re.fullmatch( r'\d+', expression ):
+                self.add_value( int( expression ) )
+            elif re.fullmatch( r'\'[ -~]\'', expression ):
+                self.add_value( ord( expression[1] ) )
+            elif re.fullmatch( r'\".*\"', expression ):
+                for i, char in enumerate( expression[1:-1] ):
+                    self.set_cursor( var_ind[i] )
+                    self.add_value( ord( char ) )
+            elif re.fullmatch( r'\{\d+(, \d+)*\}', expression ):
+                values = expression.strip( '{}' ).split( ', ' )
+                for i, value in enumerate( values ):
+                    self.set_cursor( var_ind[i] )
+                    self.add_value( int( value ) )
+            elif re.fullmatch( r'\w+\[\d+\]', expression ):
+                src_name, src_idx = parse_name_and_index( expression )
+                src_index = self.get_variable_index( src_name ) + src_idx * 2
+                self.copy( src_index, var_ind )
+            elif re.fullmatch( r'\w+', expression ):
+                for i in range( len( var_ind ) ):
+                    self.copy( self.get_variable_index( expression )[i], var_ind[i] )
+            elif re.fullmatch( r'.+ [\+\-\*/] .+', expression ):
+                op1, op2 = re.split( r'[\+\-\*/]', expression )
+                buff1, buff2, buff3 = self.gen_name(), self.gen_name(), self.gen_name()
+                var1_ind, var2_ind, var3_ind = self.create_variable( buff1 ), self.create_variable( buff2 ), self.create_variable( buff3 )
+                handle_simple_assignment( var1_ind, op1.strip() )
+                handle_simple_assignment( var2_ind, op2.strip() )
+                if re.findall( r'[\+\-\*/]', expression )[0] == '+':
+                    self.move( var1_ind[0], var3_ind[0] )
+                    self.move( var2_ind[0], var3_ind[0] )
+                elif re.findall( r'[\+\-\*/]', expression )[0] == '-':
+                    self.move( var1_ind[0], var3_ind[0] )
+                    self.move( var2_ind[0], var3_ind[0], False )
+                elif re.findall( r'[\+\-\*/]', expression )[0] == '*':
+                    self.iterate( var1_ind, [ self.copy, var2_ind[0], var3_ind[0] ] )
+                elif re.findall( r'[\+\-\*/]', expression )[0] == '/':
+                    pass
+                self.del_variable( buff1 ), self.del_variable( buff2 ), self.del_variable( buff3 )
+            else:
+                print( f"Выражение не обработано: \"{ expression }\"" )
+
+        if re.fullmatch( r'det \w+(\[\d+\])?', command ):   # det a # det a[3]
+            name = re.findall( r"\w+", command )[1]
+            if re.fullmatch( r"det \w+\[\d+\]", command ):
+                size = int( re.findall( r'\[\d+\]', command )[0].strip( '[]' ) )
+            else:
+                size = 1
+            self.create_variable( name, size )
+        elif re.fullmatch( r'det \w+ = .*', command ):  # det a = ...
+            name = re.findall( r"\w+", command )[1]
+            expression = command.split( ' = ', 1 )[1]
+            self.execution( f"det { name }", indent + 1 )
+            self.execution( f"{ name } = { expression }", indent + 1 )
+        elif re.fullmatch( r'det \w+\[\d+\] = .*', command ):  # det a[3] = ...
+            name = re.findall( r"\w+", command )[1]
+            len_array = int( re.findall( r'\[\d+\]', command )[0].strip( '[]' ) )
+            expression = command.split( ' = ', 1 )[1]
+            self.execution( f"det { name }[{ len_array }]", indent + 1 )
+            self.execution( f"{ name } = { expression }", indent + 1 )
+        elif re.fullmatch( r'\w+ = .*', command ):  # a = ...
+            name, expression = command.split( ' = ', 1 )
+            var_ind = self.get_variable_index( name )
+            handle_simple_assignment( var_ind, expression )
+        elif re.fullmatch( r'\w+ = .*', command ):  # a[3] = ...
+            name, index = command[:-1].split( '[' )
+            expression = command.split( ' = ', 1 )[1]
+            var_ind = self.get_variable_index( name )
+            self.set_cursor( var_ind )
+            handle_simple_assignment( var_ind + index * 2, expression )
+        elif re.fullmatch( r'cout( << .+)+', command ):
+            params = command[4:].lstrip( ' << ' ).split( ' << ' )
+            buff = self.gen_name()
+            self.create_variable( buff )
+            var_id = self.get_variable_index( buff )
+            for param in params:
+                handle_simple_assignment( var_id, param )
+                self.print()
+            self.del_variable( buff )
+        elif re.fullmatch( r'if .+ \{.*\}', command ):
+            cond, body = re.split( r' \{', command[3:], 1 )
+            body = body.rstrip( '}' )
+            buff = self.gen_name()
+            handle_simple_assignment( self.get_variable_index( buff ), cond )
+            self.condition( self.get_variable_index( buff ), self.render_fragment( body ) )
+            self.del_variable( buff )
+        elif re.fullmatch( r'while .+ \{.*\}', command ):
+            cond, body = re.split( r' {', command[6:], 1 )
+            body = body.rstrip( '}' )
+            buff = self.gen_name()
+            self.create_variable( buff )
+            handle_simple_assignment( self.get_variable_index( buff ), cond )
+            self.iterate( self.get_variable_index( buff )[0], [ [ self._execute_command, render_command ] for render_command in self.render_fragment( body.replace( cond, buff ) ) ] + [ [ self.set_cursor, self.get_variable_index( buff )[0] ], [ self.add_value, 1 ] ] )
+            self.del_variable( buff )
         
-
-    # Methods 
-    def find_cursor( self ):
+    ### Methods
+    def find_cursor( self ) -> int:
         return self.code.count( '>' ) - self.code.count( '<' )
     
-    def set_cursor( self, ind ):
+    def set_cursor( self, ind: int ) -> None:
         cursor = self.find_cursor()
         self.code += '>' * ( ind - cursor ) + '<' * ( cursor - ind )
 
-    def add_value( self, ind, value ):
-        self.set_cursor( ind )
+    def clear_value( self ) -> None:
+        self.code += '[-]'
+    
+    def add_value( self, value ) -> None:
         self.code += '+' * value + '-' * ( -value )
 
-    def clear_value( self, ind ):
-        self.set_cursor( ind )
-        self.code += '[-]'
+    def _execute_command( self, command: str ) -> None:
+        self.execution( command )
 
-    def set_value( self, ind, value ):
-        self.clear_value( ind )
-        self.add_value( ind, value )
-
-    def iterate( self, ind, commands ):
+    def condition( self, ind: int, commands: list[list] ) -> None:
         self.set_cursor( ind )
-        self.code += "["
+        self.code += '['
         for command in commands:
-            if isinstance( command, str ):
-                self.compile( command )
-            else:
-                command[ 0 ]( *command[ 1: ] )
-        self.set_cursor( ind )
-        self.code += "-]"
-    
-    def move( self, where_from, where ):
-        self.iterate( where_from, [ [ self.add_value, where, 1 ] ] )
+            command[0]( *command[1:] )
+        self.code += ']'
 
-    def copy( self, where_from, where, forward=True ):
-        self.iterate( where_from, [ [ self.add_value, where_from + 1, 1 ], [ self.add_value, where, forward*2 - 1 ] ] )
-        self.move( where_from + 1, where_from )
+    def iterate( self, ind: int, commands: list[str] ) -> None:
+        self.condition( ind, commands + [ [ self.set_cursor, ind ], [ self.add_value, -1 ] ] )
 
-    def equality( self, operand1, operand2, output, forward=True ):
-        self.clear_value( output )
-        self.copy( operand1, output )
-        self.copy( operand2, output, False )
+    def move( self, src: int, dst: int, forward: bool = True ) -> None:
+        self.iterate( src, [ [ self.set_cursor, dst ], [ self.add_value, forward * 2 - 1 ] ] )
+
+    def copy( self, src: int, dst: int, forward: bool = True ) -> None:
+        temp = src + 1
+        self.iterate( src, [ [ self.set_cursor, temp ], [ self.add_value, 1 ], [ self.set_cursor, dst ], [ self.add_value, forward * 2 - 1 ] ] )
+        self.move( temp, src )
+
+    def equality( self, op1: int, op2: int, output: int, forward: bool = True ) -> None:
+        self.copy( op1, output )
+        self.copy( op2, output, False )
         self.set_cursor( output )
+        
         if forward:
-            self.code += ">+<[>-<[-]]>[-<+>]"
+            self.code += '>+<[>-<[-]]>[-<+>]'
         else:
-            self.code += "[>+<[-]]>[-<+>]"
+            self.code += '[>+<[-]]>[-<+>]'
 
-    def comparison( self, operand1, operand2, output, strictly, forward=True ):
-        pass
+    def print( self ) -> None:
+        self.code += '.'
 
-    @staticmethod
-    def gen_name():
-        return "gen_" + str( hash( random.random() ) )
-    
-bd = BrainDuck()
+    def input( self ) -> None:
+        self.code += ','
 
-with open( 'test', 'r' ) as file:
-    for command in file.read().split('\n'):
-        bd.execution( command )
+code = BrainDuck()
 
-print( bd.params )
-print( bd.code )
+with open( 'test.bd', 'r' ) as file:
+    code.render( file.read() )
+
+print( *code.variables )
+print( code.code )
