@@ -71,8 +71,9 @@ class BrainDuck:
             return name, int( index )
 
         def handle_simple_assignment( var_ind: list[int], expression: str ) -> None:
-            print('fff',expression, var_ind)
+            print('    ' * ( indent +1) + "Выражение:", expression)
             self.set_cursor( var_ind[0] )
+            self.clear_value()
             if re.fullmatch( r'\d+', expression ):
                 self.add_value( int( expression ) )
             elif re.fullmatch( r'\'[ -~]\'', expression ):
@@ -93,23 +94,37 @@ class BrainDuck:
             elif re.fullmatch( r'\w+', expression ):
                 for i in range( len( var_ind ) ):
                     self.copy( self.get_variable_index( expression )[i], var_ind[i] )
+            elif re.fullmatch( r'.+ [=\!]= .+', expression ):
+                op1, op2 = re.split( r'[=\!]=', expression )
+                buff1, buff2 = self.gen_name(), self.gen_name()
+                var1_ind, var2_ind = self.create_variable( buff1 ), self.create_variable( buff2)
+                handle_simple_assignment( var1_ind, op1.strip() )
+                handle_simple_assignment( var2_ind, op2.strip())
+                self.move(var2_ind[0], var1_ind[0], False)
+                self.set_cursor(var_ind[0])
+                if re.findall( r'[!=]=', expression )[0][0] != '!':
+                    self.add_value(1)
+                    self.condition( var1_ind[0], [[self.set_cursor, var_ind[0]], [self.add_value, -1],[self.set_cursor, var1_ind[0]], [self.clear_value]])
+                else:
+                    self.condition( var1_ind[0], [[self.set_cursor, var_ind[0]], [self.add_value, 1],[self.set_cursor, var1_ind[0]], [self.clear_value]])
+                self.del_variable( buff1 ), self.del_variable( buff2)
             elif re.fullmatch( r'.+ [\+\-\*/] .+', expression ):
                 op1, op2 = re.split( r'[\+\-\*/]', expression )
-                buff1, buff2, buff3 = self.gen_name(), self.gen_name(), self.gen_name()
-                var1_ind, var2_ind, var3_ind = self.create_variable( buff1 ), self.create_variable( buff2 ), self.create_variable( buff3 )
+                buff1, buff2 = self.gen_name(), self.gen_name()
+                var1_ind, var2_ind = self.create_variable( buff1 ), self.create_variable( buff2 )
                 handle_simple_assignment( var1_ind, op1.strip() )
                 handle_simple_assignment( var2_ind, op2.strip() )
                 if re.findall( r'[\+\-\*/]', expression )[0] == '+':
-                    self.move( var1_ind[0], var3_ind[0] )
-                    self.move( var2_ind[0], var3_ind[0] )
+                    self.move( var1_ind[0], var_ind[0] )
+                    self.move( var2_ind[0], var_ind[0] )
                 elif re.findall( r'[\+\-\*/]', expression )[0] == '-':
-                    self.move( var1_ind[0], var3_ind[0] )
-                    self.move( var2_ind[0], var3_ind[0], False )
+                    self.move( var1_ind[0], var_ind[0] )
+                    self.move( var2_ind[0], var_ind[0], False )
                 elif re.findall( r'[\+\-\*/]', expression )[0] == '*':
-                    self.iterate( var1_ind, [ self.copy, var2_ind[0], var3_ind[0] ] )
+                    self.iterate( var1_ind[0], [ [ self.copy, var2_ind[0], var_ind[0] ] ] )
                 elif re.findall( r'[\+\-\*/]', expression )[0] == '/':
                     pass
-                self.del_variable( buff1 ), self.del_variable( buff2 ), self.del_variable( buff3 )
+                self.del_variable( buff1 ), self.del_variable( buff2 )
             else:
                 print( f"Выражение не обработано: \"{ expression }\"" )
 
@@ -141,7 +156,7 @@ class BrainDuck:
             var_ind = self.get_variable_index( name )
             self.set_cursor( var_ind )
             handle_simple_assignment( var_ind + index * 2, expression )
-        elif re.fullmatch( r'cout( << .+)+', command ):
+        elif re.fullmatch( r'cout( << .+)+', command ): # cout << ... << ...
             params = command[4:].lstrip( ' << ' ).split( ' << ' )
             buff = self.gen_name()
             self.create_variable( buff )
@@ -150,21 +165,32 @@ class BrainDuck:
                 handle_simple_assignment( var_id, param )
                 self.print()
             self.del_variable( buff )
-        elif re.fullmatch( r'if .+ \{.*\}', command ):
-            cond, body = re.split( r' \{', command[3:], 1 )
+        elif re.fullmatch( r'if .+ \{.*\}', command ):  # if ... {...; ...;}
+            cond, body = re.split( r' \{', command[3:], maxsplit=1 )
             body = body.rstrip( '}' )
             buff = self.gen_name()
+            self.create_variable(buff)
             handle_simple_assignment( self.get_variable_index( buff ), cond )
-            self.condition( self.get_variable_index( buff ), self.render_fragment( body ) )
+            self.condition( self.get_variable_index( buff )[0], [ [ self._execute_command, render_command ] for render_command in self.render_fragment( body ) ] )
             self.del_variable( buff )
-        elif re.fullmatch( r'while .+ \{.*\}', command ):
-            cond, body = re.split( r' {', command[6:], 1 )
+        elif re.fullmatch( r'while .+ \{.*\}', command ):   # while ... {...; ...;}
+            cond, body = re.split( ' {', command[6:], maxsplit=1 )
             body = body.rstrip( '}' )
             buff = self.gen_name()
             self.create_variable( buff )
             handle_simple_assignment( self.get_variable_index( buff ), cond )
-            self.iterate( self.get_variable_index( buff )[0], [ [ self._execute_command, render_command ] for render_command in self.render_fragment( body.replace( cond, buff ) ) ] + [ [ self.set_cursor, self.get_variable_index( buff )[0] ], [ self.add_value, 1 ] ] )
+            self.condition( self.get_variable_index( buff )[0], [ [ self._execute_command, render_command ] for render_command in self.render_fragment( body.replace( cond, buff ) ) ] +  [ [ self._execute_command, f"{buff} = {cond}"] ] + [[self.set_cursor, self.get_variable_index( buff )[0]]] )
             self.del_variable( buff )
+        elif re.fullmatch( r'\w+ [\+\-\*/]= .+', command ):  # a += ...
+            name, expression = re.split(r' [\+\-\*/]= ', command)
+            op = re.findall(r' [\+\-\*/]= ', command)[0][1]
+            buff = self.gen_name()
+            self.create_variable( buff )
+            self._execute_command( f"{buff} = {name} {op} {expression}" )
+            self._execute_command( f"{name} = {buff}" )
+            self.del_variable( buff )
+        else:
+            print(f"Команда не обработана: ", command)
         
     ### Methods
     def find_cursor( self ) -> int:
