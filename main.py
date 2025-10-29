@@ -108,6 +108,19 @@ class BrainDuck:
                 else:
                     self.condition( var1_ind[0], [[self.set_cursor, var_ind[0]], [self.add_value, 1],[self.set_cursor, var1_ind[0]], [self.clear_value]])
                 self.del_variable( buff1 ), self.del_variable( buff2)
+            elif re.fullmatch( r'.+ [><]= .+', expression ):
+                op1, op2 = re.split( r'[><]=', expression )
+                buff1, buff2, buff3 = self.gen_name(), self.gen_name(), self.gen_name()
+                var1_ind, var2_ind, var3_ind = self.create_variable( buff1 ), self.create_variable( buff2), self.create_variable( buff3)
+                handle_simple_assignment( var1_ind, op1.strip() )
+                handle_simple_assignment( var2_ind, op2.strip())
+                self.set_cursor(var3_ind[0])
+                self.add_value(255)
+                if re.findall( r'[><]=', expression )[0][0] == '>':
+                    self.iterate( var3_ind[0], [[self.set_cursor, var1_ind[0] ], [self.add_value, 1], [self._execute_command, f"if {buff1} == {buff2} "+"{"+f"{buff3} = 0;"+"}"]])
+                else:
+                    self.condition( var1_ind[0], [[self.set_cursor, var_ind[0]], [self.add_value, 1],[self.set_cursor, var1_ind[0]], [self.clear_value]])
+                self.del_variable( buff1 ), self.del_variable( buff2)
             elif re.fullmatch( r'.+ [\+\-\*/] .+', expression ):
                 op1, op2 = re.split( r'[\+\-\*/]', expression )
                 buff1, buff2 = self.gen_name(), self.gen_name()
@@ -207,6 +220,7 @@ class BrainDuck:
         self.code += '+' * value + '-' * ( -value )
 
     def _execute_command( self, command: str ) -> None:
+        print(command)
         self.execution( command )
 
     def condition( self, ind: int, commands: list[list] ) -> None:
