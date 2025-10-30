@@ -28,11 +28,12 @@ class BD:
         self.optimize()
 
     def optimize( self ):
-        if self.variables:
-            for i in range( 1, len( self.variables ) ):
-                if self.variables[ -i ] != False:
-                    self.variables = self.variables[ : -i ]
-                    break
+        pass
+    #     if self.variables:
+    #         for i in range( 1, len( self.variables ) ):
+    #             if self.variables[ -i ] != False:
+    #                 self.variables = self.variables[ : -i ]
+    #                 break
 
     def gen_variable( self ):
         self.last_gen_name += 1
@@ -76,7 +77,7 @@ class BD:
                 self.add_value( ord( expression[1] ) )
             elif re.fullmatch( r'\w+', expression ):    # Обработка переменных
                 self.copy( self.get_variable_index( expression ), var_ind )
-            elif re.fullmatch( r'.+ [!=]= .+', expression ):    # Обработка неравенств двух аргументов
+            elif re.fullmatch( r'.+ [!=]= .+', expression ):    # Обработка равенств двух аргументов
                 op1, op2 = re.split( r' [!=]= ', expression )
                 operation = re.findall( r'[!=]=', expression )[0]
                 tmp1, tmp1_ind = self.gen_variable()
@@ -85,7 +86,7 @@ class BD:
                 handle_simple_assignment( tmp2_ind, op2 )
                 self.equality( tmp1_ind, tmp2_ind, var_ind, operation=='==' )
                 self.del_variable( tmp1 ), self.del_variable( tmp2 )
-            elif re.fullmatch( r'.+ [><] .+', expression ):
+            elif re.fullmatch( r'.+ [><] .+', expression ): # Обработка строгих неравенств
                 op1, op2 = re.split( r' [><] ', expression )
                 operation = re.findall( r'[><]', expression )[0]
                 arg1, arg1_ind = self.gen_variable()
@@ -94,6 +95,18 @@ class BD:
                 handle_simple_assignment( arg2_ind, op2 )
                 if operation == '>':
                     self.comparison( arg1_ind, arg2_ind, var_ind )
+                else:
+                    self.comparison( arg2_ind, arg1_ind, var_ind )
+                self.del_variable( arg1 ), self.del_variable( arg2 )
+            elif re.fullmatch( r'.+ [><]= .+', expression ): # Обработка нестрогих неравенств
+                op1, op2 = re.split( r' [><]= ', expression )
+                operation = re.findall( r'[><]', expression )[0]
+                arg1, arg1_ind = self.gen_variable()
+                arg2, arg2_ind = self.gen_variable()
+                handle_simple_assignment( arg1_ind, op1 )
+                handle_simple_assignment( arg2_ind, op2 )
+                if operation == '>':
+                    self.comparison( arg2_ind, arg1_ind, var_ind, False )
                 else:
                     self.comparison( arg1_ind, arg2_ind, var_ind, False )
                 self.del_variable( arg1 ), self.del_variable( arg2 )
@@ -207,7 +220,7 @@ class BD:
         ] )
         self.move( tmp, src )
     
-    def equality( self, op1: int, op2: int, output: int, forward: bool = True ) -> None:
+    def equality( self, op1: int, op2: int, output: int, forward: bool = True ) -> None:    # Сравнивает значение из ячеек op1 и op2, результат в output
         self.copy( op1, output )
         self.copy( op2, output, False )
         self.set_cursor( output )
@@ -216,31 +229,29 @@ class BD:
         else:
             self.code += '[>+<[-]]>[-<+>]'
 
-    def comparison( self, op1: int, op2: int, output: int, forward: bool = True ) -> None:
-        tmp, tmp_ind = self.gen_variable()
-        arg1, arg1_ind = self.gen_variable()
-        arg2, arg2_ind = self.gen_variable()
-        self.copy( op1, arg1_ind )
-        self.copy( op2, arg2_ind )
-        self.set_cursor( tmp_ind )
-        self.code += '+['
-        self.set_cursor( tmp_ind )
-        self.set_cursor( arg1_ind )
-        self.code += '-['
-        self.set_cursor( arg2_ind )
-        self.code += '-['
-        self.set_cursor( tmp_ind )
-        self.code += '+'
-        self.set_cursor( output )
-        self.code += '-]'
-        self.set_cursor( tmp_ind )
-        self.code += '-'
-        self.set_cursor( output )
-        self.code += '-]'
-        self.set_cursor( output )
-        self.code += '+]'
-        self.del_variable( tmp ), self.del_variable( arg1 ), self.del_variable( arg2 )
-
+    def comparison( self, op1: int, op2: int, output: int, forward: bool = True ) -> None:  # Метод проверяет больше ли op1 чем op2
+        # Этот метод позволяет вычислить два выражения
+        # Если forward = True, то метод аналогичен операции op1 > op2
+        # Если forward = False, то метод аналогичен операции op1 <= op2
+        # Это работает так, потому что эти операции обратны друг другу
+        two_byte_1, tb1_ind = self.gen_variable()
+        two_byte_2, tb2_ind = self.gen_variable()
+        two_byte_3, tb3_ind = self.gen_variable()
+        self.set_cursor( tb1_ind )
+        self.add_value( 1 )
+        self.copy( op1, tb2_ind )
+        self.copy( op2, tb2_ind + 1 )
+        self.set_cursor( tb1_ind )
+        if forward:
+            self.code += ">>[[->]<<]<[->]+<[>-<-]"
+        else:
+            self.code += ">>[[->]<<]<[->]+<[>+<-]>-<"
+        self.set_cursor( tb2_ind )
+        self.clear_value()
+        self.set_cursor( tb2_ind + 1 )
+        self.clear_value()
+        self.move( tb1_ind +  1, output )
+        self.del_variable( two_byte_1 ), self.del_variable( two_byte_2 ), self.del_variable( two_byte_3 )
 
     def print( self ) -> None:
         self.code += '.'
@@ -261,4 +272,6 @@ if __name__ == "__main__":  # python main -i "input_file.bd" -o "output_file.bf"
     
     with open( output_file, 'w', encoding="utf-8" ) as file:
         file.write( bd.render_code( code ) )
+
+    print(bd.variables)
     
