@@ -129,10 +129,10 @@ class BD:
                     ] )
                 elif operation == '/':
                     tmp2, tmp2_ind = self.gen_variable()
-                    handle_simple_assignment( tmp_ind, op1 )
                     handle_simple_assignment( tmp2_ind, op2 )
-                    self.execution( f"{self.variables[var_ind//2]} = -1", indent + 1 )
-                    self.execution( "while " + f"{tmp} <= 126" + " {" + f"{tmp} -= {tmp2};{self.variables[var_ind//2]} += 1;" + "}", indent + 1 )
+                    handle_simple_assignment( tmp_ind, op1 + ' - ' + op2 )
+                    self.execution( f"{self.variables[var_ind//2]} = 1", indent + 1 )
+                    self.execution( "while " + f"{tmp} - {tmp2} <= 126" + " {" + f"{tmp} -= {tmp2};{self.variables[var_ind//2]} += 1;" + "}", indent + 1 )
                     self.del_variable( tmp2 )
                 self.del_variable( tmp )
             else:
@@ -289,7 +289,7 @@ if __name__ == "__main__":  # python main -i "input_file.bd" -o "output_file.bf"
         code = file.read()
     
     with open( output_file, 'w', encoding="utf-8" ) as file:
-        file.write( bd.render_code( code ) )
+        file.write( bd.render_code( code ) + '@' )
 
     print(bd.variables)
     
