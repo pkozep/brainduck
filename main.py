@@ -28,12 +28,11 @@ class BD:
         self.optimize()
 
     def optimize( self ):
-        pass
-    #     if self.variables:
-    #         for i in range( 1, len( self.variables ) ):
-    #             if self.variables[ -i ] != False:
-    #                 self.variables = self.variables[ : -i ]
-    #                 break
+        if self.variables:
+            i = len( self.variables ) - 1
+            while i >= 0 and self.variables[i] is False:
+                i -= 1
+            self.variables = self.variables[:i + 1]
 
     def gen_variable( self ):
         self.last_gen_name += 1
@@ -71,7 +70,7 @@ class BD:
         
         def handle_simple_assignment( var_ind: int, expression: str ) -> None:  # Вычисляет значение expression и заносит значение в ячейку с индексом var_ind
             self.set_cursor( var_ind )
-            if re.fullmatch( r'\d+', expression ):  # Обработка чисел
+            if re.fullmatch( r'[-]?\d+', expression ):  # Обработка чисел
                 self.add_value( int( expression ) )
             elif re.fullmatch( r'\'[ -~]\'', expression ):  # Обработка символов
                 self.add_value( ord( expression[1] ) )
@@ -129,7 +128,12 @@ class BD:
                         [ self.add_value, -1 ]
                     ] )
                 elif operation == '/':
-                    self.execution( "", indent + 1 )
+                    tmp2, tmp2_ind = self.gen_variable()
+                    handle_simple_assignment( tmp_ind, op1 )
+                    handle_simple_assignment( tmp2_ind, op2 )
+                    self.execution( f"{self.variables[var_ind//2]} = -1", indent + 1 )
+                    self.execution( "while " + f"{tmp} <= 126" + " {" + f"{tmp} -= {tmp2};{self.variables[var_ind//2]} += 1;" + "}", indent + 1 )
+                    self.del_variable( tmp2 )
                 self.del_variable( tmp )
             else:
                 print( f"Выражение не обработано: \"{ expression }\"" )
@@ -139,12 +143,26 @@ class BD:
             var_ind = self.create_variable( name )
         elif re.fullmatch( r'det \w+ = .*', command ):  # det a = ...
             name, expression = re.split( ' = ', command[4:], maxsplit=1 )
-            var_ind = self.create_variable( name )
-            handle_simple_assignment( var_ind, expression )
+            self.execution( f"det {name}", indent + 1 )
+            self.execution( f"{name} = {expression}", indent + 1 )
         elif re.fullmatch( r'\w+ = .*', command ):  # a = ...
             name, expression = re.split( ' = ', command, maxsplit=1 )
             var_ind = self.get_variable_index( name )
-            handle_simple_assignment( var_ind, expression )
+            tmp, tmp_ind = self.gen_variable()
+            handle_simple_assignment( tmp_ind, expression )
+            self.set_cursor(  var_ind )
+            self.clear_value()
+            self.move( tmp_ind, var_ind )
+            self.del_variable( tmp )
+        elif re.fullmatch( r'del \w+', command ):  # del a
+            name = command[4:]
+            self.set_cursor( self.get_variable_index( name ) )
+            self.clear_value()
+            self.del_variable( name )
+        elif re.fullmatch( r'\w+ [\+\-\*/]= .*', command ):  # a += ...
+            name, expression = re.split( r' [\+\-\*/]= ', command, maxsplit=1 )
+            operation = re.findall( r' [\+\-\*/]= ', command )[0][1]
+            self.execution( f"{name} = {name} {operation} {expression}", indent + 1 )
         elif re.fullmatch( r'print .+', command ): # print ...
             expression = command[6:]
             tmp, tmp_ind = self.gen_variable()
@@ -170,12 +188,11 @@ class BD:
             tmp, tmp_ind = self.gen_variable()
             handle_simple_assignment( tmp_ind, cond )
             self.cycl( tmp_ind, [
-                [ self.set_cursor, tmp_ind ],
-                [ self.add_value, -1 ] 
+                [ self.execution, render_command, indent + 1 ] for render_command in self.render_fragment( body.replace( cond, tmp ) )
             ] + [
-                [ self.execution, render_command ] for render_command in self.render_fragment( body.replace( cond, tmp ) )
+                [ self.execution, f"{tmp} = {cond}", indent + 1 ]
             ] )
-            self.del_variable(tmp )
+            self.del_variable( tmp )
         else:
             print(f"Команда не обработана: ", command)
         
@@ -198,6 +215,7 @@ class BD:
         self.code += '['
         for command in commands:
             command[0]( *command[1:] )
+        self.set_cursor( ind )
         self.code += ']'
 
     def move( self, src: int, dst: int, forward: bool = True ) -> None: # Перемещает значение ячейки src в ячейку dst
