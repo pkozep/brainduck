@@ -1,6 +1,6 @@
 # Test file test.bd and output.bd
 test.bd
-output.bd
+test.bf
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
