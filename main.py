@@ -1,45 +1,68 @@
 import re
 from sys import argv
 
+"""
+    Ответы на некоторые вопросы:
+    1) Возникает некоторая путаница потому что, когда размер переменных (sizeVar)
+    равен 1 на деле выделяется 2 ячейки памяти, когда равен 2 выделяеться 4 и т.д.
+    Это происходит потому что, операция копирования значения из ячейки требует
+    использовать буферную ячейку, и в целях оптимизации работы программы
+    была выбрана такая архитектура работы с памятью, тоесть каждому полезному байту памяти
+    соответствует 1 байт памяти, необходиый чтобы скопировать значение этого байта.
+    2) Для работы с отрицательными числами используется беззнаковая запись
+    иными словами для положительных значений выделены числа от 0 до 128 а для отрицательных от 129 до 255
+    3) Важный приниц, в коде BF++ есть вариантивность, а следовательно
+    для возможности поиска курсора необходимо ограничить эту вариантивность строгим правилом
+    КАЖДЫЙ БЛОК КОДА С СЛОВИЯМИ ДОЛЖЕН ЗАКАНЧИВАТЬСЯ В ОДНОЙ И ТОЙЖЕ ЯЧЕЙКЕ НЕ ЗАВИСИМО ОТ ВЫПОЛНЕНИЯ УСЛОВИЙ
+"""
+
 class BD:
-    def __init__( self ) -> None:
-        self.last_gen_name = 0
-        self.variables = []
-        self.code = ""
-
-    # Методы работы с памятью
-    def create_variable( self, name: str ) -> int:
-        for i in range( len( self.variables ) ):
-            if self.variables[i] == name:
-                return i * 2
-        else:
-            self.variables.append( name )
-            return self.variables.index( name ) * 2
-
-    def get_variable_index( self, name: str ) -> int:
-        return self.variables.index( name ) * 2
-
-    def del_variable( self, name: str ) -> None:
-        for i in range( len( self.variables ) ):
-            if self.variables[i] == name:
-                self.variables[i] = False
-                self.set_cursor( i * 2 )
-                self.clear_value()
-        self.optimize()
-
-    def optimize( self ):
-        if self.variables:
-            i = len( self.variables ) - 1
-            while i >= 0 and self.variables[i] is False:
-                i -= 1
-            self.variables = self.variables[:i + 1]
-
-    def gen_variable( self ):
-        self.last_gen_name += 1
-        name = 'gen_' + str( self.last_gen_name ).zfill( 8 )
-        return name, self.create_variable( name )
+    def __init__( self ) -> None:   
+        self.last_gen_name = 0  # Это счётчик для того, чтобы генерируемые переменные имели уникальное имя
+        self.memory = [] # Это список занятых ячеек памяти
+        self.code = "" # Это результирующий код на BF++ 
     
+    def get_memory( self, nameVar: str, sizeVar: int = 1 ) -> int: # Метод резервирует необходимое количество ячеек за переменой и возвращает индекс первой ячейки
+        free_start, free_count = -1, 0
+        for i, isOccupied in enumerate( self.memory ):
+            if not isOccupied:
+                free_count += 1
+                if free_count == sizeVar:
+                    free_start = i - sizeVar + 1
+                    break
+            else:
+                free_count = 0
+        
+        if free_start == -1:
+            free_start = len( self.memory )
+            self.memory.extend( [False] * sizeVar )
+        for i in range( free_start, free_start + sizeVar ):
+            self.memory[i] = nameVar
+        
+        return self.memory.index( nameVar ) * 2
+    
+    def get_variable_index( self, nameVar: str ) -> int:
+        return self.memory.index( nameVar ) * 2 # Почему индекс * 2 можно прочитать в ответах №1
+        
+    def del_variable( self, nameVar: str ) -> None: # Освобождает ячейки занятые переменной nameVar
+        for i in range( len( self.memory ) ):
+            if self.memory[i] == nameVar:
+                self.memory[i] = False
+                self.clear_value( i*2 )
+        self.optimize()
+    
+    def gen_variable( self ) -> (str, int): # Генерирует переменную, которая будет использоваться в качестве буферной переменной
+        self.last_gen_name += 1
+        name = 'gen_' + str( self.last_gen_name ).zfill( 6 )
+        return name, self.get_memory( name )
+
+    def optimize( self ) -> None: #  Удаляет подрят стоящие в конце пустые переменные, нужно для оптимизации
+        while self.memory and self.memory[-1] == False:
+            self.memory = self.memory[:-1]
+
     # Метод преобразует фрагмент кода в последовательность комманд
+    # Понимать как работает этот метод не обязательно, так как
+    # его цель всего лишь преобразовать текстовый фрагмент кода в последовательность команд
     def render_fragment( self, fragment: str ) -> list:
         commands = []
         word = ""
@@ -50,13 +73,13 @@ class BD:
             elif char == '}':
                 brace_count -= 1
             elif char == ';' and brace_count == 0 and word:
-                commands.append(word)
+                commands.append( word )
                 word = ""
                 continue
             word += char
         return commands
-    
-    # Метод преобразует код в список команд и исполняет их
+
+    # Метод исполняет список команд
     def render_code( self, code ):
         clean_code = code[1:-2].replace( '  ', '' ).replace( '\n', '' )
         commands = self.render_fragment( clean_code )
@@ -64,130 +87,148 @@ class BD:
             self.execution(command)
         return self.code
 
-    # Метод выполняет команду
-    def execution( self, command, indent: int = 0 ):
-        print( '    ' * indent, command ) # Полезно для откладки
+    # Метод выполняет команду на высоком уровне, то есть он
+    # оперирует лишь методами brainduck
+    def execution( self, command, indent: int = 0 ) -> None:
+        print( '    ' * indent, command ) # Это нужно для отладки, потом удалить
         
-        def handle_simple_assignment( var_ind: int, expression: str ) -> None:  # Вычисляет значение expression и заносит значение в ячейку с индексом var_ind
-            self.set_cursor( var_ind )
-            if re.fullmatch( r'[-]?\d+', expression ):  # Обработка чисел
-                self.add_value( int( expression ) )
-            elif re.fullmatch( r'\'[ -~]\'', expression ):  # Обработка символов
-                self.add_value( ord( expression[1] ) )
-            elif re.fullmatch( r'\w+', expression ):    # Обработка переменных
+        # Следующий метод реализует вычисление значения выражения expression
+        # Результат присваевается к значению в ячейке var_ind
+        ### Нужно доработать этот метод, что бы он верно трактовал последовательность операций 
+        def handle_simple_assignment( var_ind: int, expression: str ) -> None:
+            if re.fullmatch( r"\d+", expression ):  # Обработка целого положительного значения от 0 до 128
+                self.set_value( var_ind, int( expression ) )
+            elif re.fullmatch( r"\'[ -~]\'", expression ):  # Обработка символа ASCII
+                self.set_value( var_ind, ord( expression[1] ) )
+            elif re.fullmatch( r"\w+", expression ):    # Обработка переменных
+                self.clear_value( var_ind )
                 self.copy( self.get_variable_index( expression ), var_ind )
-            elif re.fullmatch( r'.+ [!=]= .+', expression ):    # Обработка равенств двух аргументов
-                op1, op2 = re.split( r' [!=]= ', expression )
-                operation = re.findall( r'[!=]=', expression )[0]
+            elif re.fullmatch( r".+ [!=]= .+", expression ): # Обработка равенств двух аргументов
+                op1, op2 = re.split( r" [!=]= ", expression )
+                operation = re.findall( r"[!=]=", expression )[0]
                 tmp1, tmp1_ind = self.gen_variable()
                 tmp2, tmp2_ind = self.gen_variable()
                 handle_simple_assignment( tmp1_ind, op1 )
                 handle_simple_assignment( tmp2_ind, op2 )
-                self.equality( tmp1_ind, tmp2_ind, var_ind, operation=='==' )
+                self.clear_value( var_ind )
+                if operation == "==":
+                    self.equality( tmp1_ind, tmp2_ind, var_ind )
+                else:
+                    self.equality( tmp1_ind, tmp2_ind, var_ind, False )
                 self.del_variable( tmp1 ), self.del_variable( tmp2 )
-            elif re.fullmatch( r'.+ [><] .+', expression ): # Обработка строгих неравенств
-                op1, op2 = re.split( r' [><] ', expression )
-                operation = re.findall( r'[><]', expression )[0]
+            elif re.fullmatch( r".+ [><] .+", expression ): # Обработка строгих неравенств
+                op1, op2 = re.split( r" [><] ", expression )
+                operation = re.findall( r"[><]", expression )[0]
                 arg1, arg1_ind = self.gen_variable()
                 arg2, arg2_ind = self.gen_variable()
                 handle_simple_assignment( arg1_ind, op1 )
                 handle_simple_assignment( arg2_ind, op2 )
+                self.clear_value( var_ind )
                 if operation == '>':
                     self.comparison( arg1_ind, arg2_ind, var_ind )
                 else:
                     self.comparison( arg2_ind, arg1_ind, var_ind )
                 self.del_variable( arg1 ), self.del_variable( arg2 )
-            elif re.fullmatch( r'.+ [><]= .+', expression ): # Обработка нестрогих неравенств
-                op1, op2 = re.split( r' [><]= ', expression )
-                operation = re.findall( r'[><]', expression )[0]
+            elif re.fullmatch( r".+ [><]= .+", expression ): # Обработка нестрогих неравенств
+                op1, op2 = re.split( r" [><]= ", expression )
+                operation = re.findall( r"[><]", expression )[0]
                 arg1, arg1_ind = self.gen_variable()
                 arg2, arg2_ind = self.gen_variable()
                 handle_simple_assignment( arg1_ind, op1 )
                 handle_simple_assignment( arg2_ind, op2 )
+                self.clear_value( var_ind )
                 if operation == '>':
                     self.comparison( arg2_ind, arg1_ind, var_ind, False )
                 else:
                     self.comparison( arg1_ind, arg2_ind, var_ind, False )
                 self.del_variable( arg1 ), self.del_variable( arg2 )
-            elif re.fullmatch( r'.+ [\+\-\*/] .+', expression ):    # Обработка математических операция (+-*/) для двух аргументов
-                op1, op2 = re.split( r' [\+\-\*/] ', expression )
-                operation = re.findall( r'[\+\-\*/]', expression )[0]
+            elif re.fullmatch( r".+ [\+\-\*/] .+", expression ): # Обработка математических операция (+-*/) для двух аргументов
+                op1, op2 = re.split( r" [\+\-\*/] ", expression )
+                operation = re.findall( r"[\+\-\*/]", expression )[0]
                 tmp, tmp_ind = self.gen_variable()
                 if operation == '+':
-                    handle_simple_assignment( var_ind, op1 )
-                    handle_simple_assignment( var_ind, op2 )
+                    arg1, arg1_ind = self.gen_variable()
+                    arg2, arg2_ind = self.gen_variable()
+                    handle_simple_assignment( arg1_ind, op1 )
+                    handle_simple_assignment( arg2_ind, op2 )
+                    self.clear_value( var_ind )
+                    self.move( arg1_ind, var_ind )
+                    self.move( arg2_ind, var_ind )
+                    self.del_variable( arg1 ), self.del_variable( arg2 )
                 elif operation == '-':
-                    handle_simple_assignment( var_ind, op1 )
-                    handle_simple_assignment( tmp_ind, op2 )
-                    self.move( tmp_ind, var_ind, False )
+                    arg1, arg1_ind = self.gen_variable()
+                    arg2, arg2_ind = self.gen_variable()
+                    handle_simple_assignment( arg1_ind, op1 )
+                    handle_simple_assignment( arg2_ind, op2 )
+                    self.clear_value( var_ind )
+                    self.move( arg1_ind, var_ind )
+                    self.move( arg2_ind, var_ind, False)
+                    self.del_variable( arg1 ), self.del_variable( arg2 )
                 elif operation == '*':
                     handle_simple_assignment( tmp_ind, op1 )
-                    self.cycl( tmp_ind, [
-                        [ handle_simple_assignment, var_ind, op2 ],
-                        [ self.set_cursor, tmp_ind ],
-                        [ self.add_value, -1 ]
+                    arg, arg_ind = self.gen_variable()
+                    handle_simple_assignment( arg_ind, op2 )
+                    self.cycle( tmp_ind, [
+                        [ self.add_value, -1 ],
+                        [ handle_simple_assignment, arg_ind, op2 ]
                     ] )
+                    self.clear_value( var_ind )
+                    self.move( arg_ind, var_ind )
                 elif operation == '/':
+                    tmp1, tmp1_ind = self.gen_variable()
                     tmp2, tmp2_ind = self.gen_variable()
+                    handle_simple_assignment( tmp1_ind, op1 )
                     handle_simple_assignment( tmp2_ind, op2 )
-                    handle_simple_assignment( tmp_ind, op1 + ' - ' + op2 )
-                    self.execution( f"{self.variables[var_ind//2]} = 1", indent + 1 )
-                    self.execution( "while " + f"{tmp} - {tmp2} <= 126" + " {" + f"{tmp} -= {tmp2};{self.variables[var_ind//2]} += 1;" + "}", indent + 1 )
-                    self.del_variable( tmp2 )
+                    handle_simple_assignment( tmp_ind, tmp1 + " - " + tmp2 + " <= 128" )
+                    self.cycle( tmp_ind, [
+                        [ self.copy, tmp2_ind, tmp1_ind, False ],
+                        [ handle_simple_assignment, tmp_ind, tmp1 + " - " + tmp2 + " <= 128" ],
+                        [ self.set_cursor, var_ind ],
+                        [ self.add_value, 1 ]
+                    ] )
+                    self.del_variable( tmp1 ), self.del_variable( tmp2 )
                 self.del_variable( tmp )
             else:
                 print( f"Выражение не обработано: \"{ expression }\"" )
-    
-        if re.fullmatch( r'det \w+', command ):   # det a
-            name = command[4:]
-            var_ind = self.create_variable( name )
-        elif re.fullmatch( r'det \w+ = .*', command ):  # det a = ...
-            name, expression = re.split( ' = ', command[4:], maxsplit=1 )
-            self.execution( f"det {name}", indent + 1 )
+            
+        # Следующие обработчики являются первичными обработчиками команд BrainDuck
+        if re.fullmatch( r"det\d+ \w+", command ):   # det1 a
+            size, name = command[3:].split()
+            var_ind = self.get_memory( name, int( size ) )
+        elif re.fullmatch( r"det\d+ \w+ = .*", command ):  # det a = ...
+            size_and_name, expression = re.split( " = ", command[3:], maxsplit=1 )
+            size, name = size_and_name.split()
+            self.execution( f"det{size} {name}", indent + 1 )
             self.execution( f"{name} = {expression}", indent + 1 )
-        elif re.fullmatch( r'\w+ = .*', command ):  # a = ...
+        elif re.fullmatch( r"\w+ = .*", command ):  # a = ...
             name, expression = re.split( ' = ', command, maxsplit=1 )
             var_ind = self.get_variable_index( name )
             tmp, tmp_ind = self.gen_variable()
             handle_simple_assignment( tmp_ind, expression )
-            self.set_cursor(  var_ind )
-            self.clear_value()
             self.move( tmp_ind, var_ind )
-            self.del_variable( tmp )
-        elif re.fullmatch( r'del \w+', command ):  # del a
-            name = command[4:]
-            self.set_cursor( self.get_variable_index( name ) )
-            self.clear_value()
-            self.del_variable( name )
-        elif re.fullmatch( r'\w+ [\+\-\*/]= .*', command ):  # a += ...
+            self.del_variable( tmp ) # Не очищаю tmp_ind, так как последняя команда move и так обнуляет его
+        elif re.fullmatch( r"\w+ [\+\-\*/]= .*", command ):  # a += ...
             name, expression = re.split( r' [\+\-\*/]= ', command, maxsplit=1 )
             operation = re.findall( r' [\+\-\*/]= ', command )[0][1]
             self.execution( f"{name} = {name} {operation} {expression}", indent + 1 )
-        elif re.fullmatch( r'print .+', command ): # print ...
-            expression = command[6:]
-            tmp, tmp_ind = self.gen_variable()
-            handle_simple_assignment( tmp_ind, expression )
-            self.set_cursor( tmp_ind )
-            self.print()
-            self.del_variable( tmp )
-        elif re.fullmatch( r'if .+ \{.*\}', command ):  # if ... {...; ...;}
+        elif re.fullmatch( r"if .+ \{.*\}", command ): # if ... {...; ...;}
             cond, body = re.split( r' \{', command[3:], maxsplit=1 )
             body = body.rstrip( '}' )
             tmp, tmp_ind = self.gen_variable()
             handle_simple_assignment( tmp_ind, cond )
-            self.cycl( tmp_ind, [
+            self.cycle( tmp_ind, [
                 [ self.set_cursor, tmp_ind ],
                 [ self.clear_value ]
             ] + [
                 [ self.execution, render_command ] for render_command in self.render_fragment( body ) 
             ] )
             self.del_variable( tmp )
-        elif re.fullmatch( r'while .+ \{.*\}', command ):   # while ... {...; ...;}
+        elif re.fullmatch( r"while .+ \{.*\}", command ): # while ... {...; ...;}
             cond, body = re.split( ' {', command[6:], maxsplit=1 )
             body = body.rstrip( '}' )
             tmp, tmp_ind = self.gen_variable()
             handle_simple_assignment( tmp_ind, cond )
-            self.cycl( tmp_ind, [
+            self.cycle( tmp_ind, [
                 [ self.execution, render_command, indent + 1 ] for render_command in self.render_fragment( body.replace( cond, tmp ) )
             ] + [
                 [ self.execution, f"{tmp} = {cond}", indent + 1 ]
@@ -195,50 +236,54 @@ class BD:
             self.del_variable( tmp )
         else:
             print(f"Команда не обработана: ", command)
-        
-    # Методы низкоуровневой работы с кодом BF
-    def find_cursor( self ) -> int: # Метод находит текущий индекс курсора
+
+    # Методы работы с кодом BF++
+    # Эти методы самое важное, что есть в этой программе
+    def find_cursor( self ) -> int: # Это первый и самый крутой метод (это хоть кто-то читает?) он позволяет найти текущее положение курсора подробнее в ответах №3
         return self.code.count( '>' ) - self.code.count( '<' )
     
-    def set_cursor( self, ind: int ) -> None: # Устанавливает курсор на значение ind
+    def set_cursor( self, ind: int ) -> int: # Устанавливает курсор в ячейку с индексом ind
         cursor = self.find_cursor()
         self.code += '>' * ( ind - cursor ) + '<' * ( cursor - ind )
 
-    def clear_value( self ) -> None:    # Обнуляет значение в текущей ячейке
-        self.code += '[-]'
+    def clear_value( self, ind: int ) -> None: # Обнуляет значение в текущей ячейке
+        self.set_cursor( ind )
+        self.code += "[-]"
 
-    def add_value( self, value ) -> None:   # Добавляет значение value в текущую ячейку
+    def add_value( self, value: int ) -> None: # Добавляет значение value в текущую ячейку
         self.code += '+' * value + '-' * ( -value )
 
-    def cycl( self, ind: int, commands: list ) -> None: # Цикл, который выполняет команды пока значение в ячейке ind не будет равно 0
+    def set_value( self, ind: int, value: int ) -> None: # Устанавливает значение value в ячейку ind
+        self.clear_value( ind )
+        self.add_value( value )
+
+    def cycle( self, ind: int, commands: list ) -> None: # Реализация цикла while пока ind != 0
         self.set_cursor( ind )
         self.code += '['
         for command in commands:
             command[0]( *command[1:] )
-        self.set_cursor( ind )
+        self.set_cursor( ind ) # Эта строчка нужна по причине сказаной в ответе №3
         self.code += ']'
 
     def move( self, src: int, dst: int, forward: bool = True ) -> None: # Перемещает значение ячейки src в ячейку dst
-        self.cycl( src, [
+        self.cycle( src, [
+            [ self.add_value, -1 ],
             [ self.set_cursor, dst ],
-            [ self.add_value, forward * 2 - 1 ],
-            [ self.set_cursor, src ],
-            [ self.add_value, -1 ]
+            [ self.add_value, forward * 2 - 1 ]
         ] )
-    
+
     def copy( self, src: int, dst: int, forward: bool = True ) -> None: # Копирует значение язейки src в ячейку dst
         tmp = src + 1
-        self.cycl( src, [
+        self.cycle( src, [
+            [ self.add_value, -1 ],
             [ self.set_cursor, tmp ],
             [ self.add_value, 1 ],
             [ self.set_cursor, dst ],
-            [ self.add_value, forward * 2 - 1 ],
-            [ self.set_cursor, src ],
-            [ self.add_value, -1 ]
+            [ self.add_value, forward * 2 - 1 ]
         ] )
         self.move( tmp, src )
-    
-    def equality( self, op1: int, op2: int, output: int, forward: bool = True ) -> None:    # Сравнивает значение из ячеек op1 и op2, результат в output
+
+    def equality( self, op1: int, op2: int, output: int, forward: bool = True ) -> None: # Сравнивает значение из ячеек op1 и op2, результат в output
         self.copy( op1, output )
         self.copy( op2, output, False )
         self.set_cursor( output )
@@ -264,32 +309,28 @@ class BD:
             self.code += ">>[[->]<<]<[->]+<[>-<-]"
         else:
             self.code += ">>[[->]<<]<[->]+<[>+<-]>-<"
-        self.set_cursor( tb2_ind )
-        self.clear_value()
-        self.set_cursor( tb2_ind + 1 )
-        self.clear_value()
+        self.clear_value( tb2_ind )
+        self.clear_value( tb2_ind + 1 )
         self.move( tb1_ind +  1, output )
         self.del_variable( two_byte_1 ), self.del_variable( two_byte_2 ), self.del_variable( two_byte_3 )
 
-    def print( self ) -> None:
+    def print( self ) -> None: # Выводит текущую ячейку
         self.code += '.'
 
-    def input( self ) -> None:
+    def input( self ) -> None: # Вводит значение в текущую ячейку
         self.code += ','
 
-if __name__ == "__main__":  # python main -i "input_file.bd" -o "output_file.bf"
+if __name__ == "__main__":
     for i in range(1, 4, 2):
-        if argv[i] == "-i":
-            input_file = argv[i + 1]
-        if argv[i] == "-o":
-            output_file = argv[i + 1]
-
-    bd = BD()
+        if len( argv ) == 5:
+            if argv[i] == "-i": input_file = argv[i + 1]
+            if argv[i] == "-o": output_file = argv[i + 1]
+        else:
+            raise "Необходимо передать -i <входной файл> и -o <выходной файд>"
+        
+    bd_compil = BD()
     with open( input_file, 'r', encoding="utf-8" ) as file:
         code = file.read()
-    
-    with open( output_file, 'w', encoding="utf-8" ) as file:
-        file.write( bd.render_code( code ) + '@' )
 
-    print(bd.variables)
-    
+    with open( output_file, 'w' ) as file:
+        file.write( bd_compil.render_code( code ) + "@" )
