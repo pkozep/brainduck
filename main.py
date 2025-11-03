@@ -19,8 +19,10 @@ from sys import argv
 class BD:
     def __init__( self ) -> None:   
         self.last_gen_name = 0  # Это счётчик для того, чтобы генерируемые переменные имели уникальное имя
-        self.memory = [] # Это список занятых ячеек памяти
-        self.code = "" # Это результирующий код на BF++ 
+        self.memory = ['cursorFreeSpace'] # Это список занятых ячеек памяти
+        # Записываем первое свободное место под индексом 2
+        self.code = "++" # Это результирующий код на BF++ 
+        self.cursorIndex = 0 # Этот счётчик текущего положения курсора
     
     def get_memory( self, nameVar: str, sizeVar: int = 1 ) -> int: # Метод резервирует необходимое количество ячеек за переменой и возвращает индекс первой ячейки
         free_start, free_count = -1, 0
@@ -39,6 +41,10 @@ class BD:
         for i in range( free_start, free_start + sizeVar ):
             self.memory[i] = nameVar
         
+        # Тут я обновляю курсор, указывающий на свободный участок памяти.
+        self.set_cursor( 0 )
+        self.add_value( sizeVar*2 )
+
         return self.memory.index( nameVar ) * 2
     
     def get_variable_index( self, nameVar: str ) -> int:
@@ -51,10 +57,10 @@ class BD:
                 self.clear_value( i*2 )
         self.optimize()
     
-    def gen_variable( self ) -> (str, int): # Генерирует переменную, которая будет использоваться в качестве буферной переменной
+    def gen_variable( self, size: int=1 ) -> (str, int): # Генерирует переменную, которая будет использоваться в качестве буферной переменной
         self.last_gen_name += 1
         name = 'gen_' + str( self.last_gen_name ).zfill( 6 )
-        return name, self.get_memory( name )
+        return name, self.get_memory( name, size )
 
     def optimize( self ) -> None: #  Удаляет подрят стоящие в конце пустые переменные, нужно для оптимизации
         while self.memory and self.memory[-1] == False:
@@ -90,13 +96,18 @@ class BD:
     # Метод выполняет команду на высоком уровне, то есть он
     # оперирует лишь методами brainduck
     def execution( self, command, indent: int = 0 ) -> None:
+        print(self.memory)
         print( '    ' * indent, command ) # Это нужно для отладки, потом удалить
         
         # Следующий метод реализует вычисление значения выражения expression
         # Результат присваевается к значению в ячейке var_ind
         ### Нужно доработать этот метод, что бы он верно трактовал последовательность операций 
         def handle_simple_assignment( var_ind: int, expression: str ) -> None:
-            if re.fullmatch( r"\d+", expression ):  # Обработка целого положительного значения от 0 до 128
+            if re.fullmatch( r"&.+", expression ): # Обработка указателя на значение выражения
+                tmp, tmp_ind = self.gen_variable()
+                handle_simple_assignment( tmp_ind, expression[1:] )
+                self.set_value( var_ind, tmp_ind )
+            elif re.fullmatch( r"\d+", expression ):  # Обработка целого положительного значения от 0 до 128
                 self.set_value( var_ind, int( expression ) )
             elif re.fullmatch( r"\'[ -~]\'", expression ):  # Обработка символа ASCII
                 self.set_value( var_ind, ord( expression[1] ) )
@@ -188,6 +199,20 @@ class BD:
                     ] )
                     self.del_variable( tmp1 ), self.del_variable( tmp2 )
                 self.del_variable( tmp )
+            elif re.fullmatch( r"getMemory\(\d+\)", expression ): # Метод динамически выделяет память возвращает индекс первого байта выделенной памяти
+                size = int( re.findall( r"\d+", expression )[0] )
+                self.copy( 0, var_ind )
+                self.set_cursor( 0 )
+                self.add_value( size*2 )
+            elif re.fullmatch( r"\*\w+", expression ): # Разыменование указателя
+                name = expression[1:]
+                self.copy( self.get_variable_index( name ), 1 )
+                
+                self.set_cursor( 1 )
+                
+                self.code += f'-[->>+<<]+>>>>[->>+<<]<<[-[->>+<<]>>>>[->>+<<]<<]<' # Перемещает число из ячейки 5 на индекс из ячейки 1 и оставляет в 2 ячейке флажок возврата
+                self.
+
             else:
                 print( f"Выражение не обработано: \"{ expression }\"" )
             
@@ -206,11 +231,19 @@ class BD:
             tmp, tmp_ind = self.gen_variable()
             handle_simple_assignment( tmp_ind, expression )
             self.move( tmp_ind, var_ind )
-            self.del_variable( tmp ) # Не очищаю tmp_ind, так как последняя команда move и так обнуляет его
+            self.del_variable( tmp )
         elif re.fullmatch( r"\w+ [\+\-\*/]= .*", command ):  # a += ...
             name, expression = re.split( r' [\+\-\*/]= ', command, maxsplit=1 )
             operation = re.findall( r' [\+\-\*/]= ', command )[0][1]
             self.execution( f"{name} = {name} {operation} {expression}", indent + 1 )
+        # elif re.fullmatch( r"\w+[\d+] = .*", command ):  # a[2] = ...
+        #     name_and_ind, expression = re.split( ' = ', command, maxsplit=1 )
+        #     name, ind = name_and_ind[:-1].split( '[' )
+        #     var_ind = self.get_variable_index( name )
+        #     tmp, tmp_ind = self.gen_variable()
+        #     handle_simple_assignment( tmp_ind, expression )
+        #     self.move( tmp_ind, var_ind + int( ind ) )
+        #     self.del_variable( tmp )
         elif re.fullmatch( r"if .+ \{.*\}", command ): # if ... {...; ...;}
             cond, body = re.split( r' \{', command[3:], maxsplit=1 )
             body = body.rstrip( '}' )
@@ -239,16 +272,13 @@ class BD:
 
     # Методы работы с кодом BF++
     # Эти методы самое важное, что есть в этой программе
-    def find_cursor( self ) -> int: # Это первый и самый крутой метод (это хоть кто-то читает?) он позволяет найти текущее положение курсора подробнее в ответах №3
-        return self.code.count( '>' ) - self.code.count( '<' )
-    
     def set_cursor( self, ind: int ) -> int: # Устанавливает курсор в ячейку с индексом ind
-        cursor = self.find_cursor()
-        self.code += '>' * ( ind - cursor ) + '<' * ( cursor - ind )
+        self.cursorIndex += ind
+        self.code += '>' * ( ind - self.cursorIndexr ) + '<' * ( self.cursorIndex - ind )
 
     def clear_value( self, ind: int ) -> None: # Обнуляет значение в текущей ячейке
         self.set_cursor( ind )
-        self.code += "[-]"
+        self.code += "@"
 
     def add_value( self, value: int ) -> None: # Добавляет значение value в текущую ячейку
         self.code += '+' * value + '-' * ( -value )
@@ -272,7 +302,7 @@ class BD:
             [ self.add_value, forward * 2 - 1 ]
         ] )
 
-    def copy( self, src: int, dst: int, forward: bool = True ) -> None: # Копирует значение язейки src в ячейку dst
+    def copy( self, src: int, dst: int, forward: bool = True ) -> None: # Копирует значение ячейки src в ячейку dst
         tmp = src + 1
         self.cycle( src, [
             [ self.add_value, -1 ],
@@ -283,14 +313,33 @@ class BD:
         ] )
         self.move( tmp, src )
 
+    def add_value_dynamic( self, ind: int, value: int ) -> None: # Перемещает значение из 5 ячейки в ячейку под индексом записанным в ячейке 1 
+        self.copy( ind, 1 ) # Для алгоритма нужно стартовать из 1
+        self.set_cursor( 5 )
+        self.add_value( value )
+        self.set_cursor( 1 )
+        self.cursorIndex = 0
+        self.code += '-[->>+<<]+>>>>[->>+<<]<<[-[->>+<<]>>>>[->>+<<]<<]>>>>[-<<<<<+>>>>>]<<<<<'
+
+    def copy_value_dynamic( self, src: int, dst: int ) -> None:
+        self.copy( src, 5 )
+        self.set_cursor( 1 )
+        self.cursorIndex = 0
+        self.add_value_dynamic( dst, 0 )
+
+    def exit_dynamic( self ) -> None: # Возвращает программу к обыкновенному адресованию
+        self.code += '<-[+<<-]<'
+        self.cursorIndex = 0
+
     def equality( self, op1: int, op2: int, output: int, forward: bool = True ) -> None: # Сравнивает значение из ячеек op1 и op2, результат в output
         self.copy( op1, output )
         self.copy( op2, output, False )
         self.set_cursor( output )
         if forward:
-            self.code += '>+<[>-<[-]]>[-<+>]'
+            self.code += '>+<[>-<@]>[-<+>]'
         else:
-            self.code += '[>+<[-]]>[-<+>]'
+            self.code += '[>+<@]>[-<+>]'
+        self.cursorIndex += 1
 
     def comparison( self, op1: int, op2: int, output: int, forward: bool = True ) -> None:  # Метод проверяет больше ли op1 чем op2
         # Этот метод позволяет вычислить два выражения
@@ -333,4 +382,4 @@ if __name__ == "__main__":
         code = file.read()
 
     with open( output_file, 'w' ) as file:
-        file.write( bd_compil.render_code( code ) + "@" )
+        file.write( bd_compil.render_code( code ) + "\"" )
