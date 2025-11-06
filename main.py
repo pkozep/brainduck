@@ -1,11 +1,11 @@
 import re
 from sys import argv
 
-BUFF_SIZE = 10
+BUFF_SIZE = 12
 
 class BD:
     def __init__( self ) -> None:
-        self.buff = [ 1 ] * BUFF_SIZE
+        self.buff = [ 0 ] * 2 + [ 1 ] * ( BUFF_SIZE - 1 )
         self.memory = [ 'cursorFreeSpace' ] + self.buff
         self.code = "+" * ( 1 + BUFF_SIZE )
         self.cursorPosition = 0
@@ -54,7 +54,7 @@ class BD:
         return commands
 
     def render_code( self, code ):
-        clean_code = code[ 1:-2 ].replace( '  ', '' ).replace( '\n', '' )
+        clean_code = code.replace( '  ', '' ).replace( '\n', '' )
         commands = self.render_fragment( clean_code )
         for command in commands:
             self.execution( command ), print( command )
@@ -63,10 +63,8 @@ class BD:
     def execution( self, command ) -> None:
         def handle_simple_assignment( var_ind: int, expression: str ) -> None:
             if re.fullmatch( r"&.+", expression ):
-                tmp = self.get_buff( 1 )
-                handle_simple_assignment( tmp[ 0 ], expression[ 1: ] )
-                self.add_value( var_ind, tmp[ 0 ]//2 - 1 )
-                self.empty_buff( tmp )
+                name = expression[ 1: ]
+                self.add_value( var_ind, self.get_variable_index( name )//2 )
             elif re.fullmatch( r"\d+", expression ):
                 tmp = self.get_buff( 1 )
                 self.add_value( var_ind, int( expression ) )
@@ -111,7 +109,7 @@ class BD:
                     self.comparison( tmp[ 0 ], tmp[ 1 ], var_ind, False )
                 self.empty_buff( tmp )
             elif re.fullmatch( r".+ [\+\-\*/] .+", expression ):
-                op1, op2 = re.split( r" [\+\-\*/] ", expression )
+                op1, op2 = re.split( r" [\+\-\*/] ", expression, maxsplit=1 )
                 operation = re.findall( r"[\+\-\*/]", expression )[ 0 ]
                 if operation == '+':
                     tmp = self.get_buff( 1 )
@@ -161,29 +159,70 @@ class BD:
         if re.fullmatch( r"det\[\d+\] \w+", command ):
             size, name = command[3:].split()
             var_ind = self.create_variable( name, int( size[ 1:-1 ] ) )
-        elif re.fullmatch( r"\*?\w+(\[\w+\])? = .*", command ):
-            name_and_index, expression = re.split( ' = ', command, maxsplit=1 )
-            name, index = re.findall( r"\w+", name_and_index )[ 0 ], re.findall( r"\[\w+\]", name_and_index )
-            var_index = self.get_variable_index( name.strip( '*' ) )
+        elif re.fullmatch( r"det\[\d+\] \w+ = .*", command ):
+            size_and_name, expression = re.split( r" = ", command, maxsplit=1 )
+            size, name = size_and_name[3:].split()
+            var_ind = self.create_variable( name, int( size[ 1:-1 ] ) )
+            handle_simple_assignment( var_ind, expression )
+        elif re.fullmatch( r"\w+ = .*", command ):
+            name, expression = re.split( ' = ', command, maxsplit=1 )
             tmp = self.get_buff( 1 )
             handle_simple_assignment( tmp[ 0 ], expression )
-            if re.fullmatch( r"\w+ = .*", command ):
-                self.set_value( var_index, 0 )
-                self.move( tmp[ 0 ], var_index )
-            elif re.fullmatch( r"\w+\[\d+\] = .*", command ):
-                self.set_value( var_index + int( index[ 0 ][ 1:-1 ] ), 0 )
-                self.move( tmp[ 0 ], var_index + int( index[ 0 ][ 1:-1 ] ) )
-            elif re.fullmatch( r"\*\w+\[\w+\] = .*", command ):
-                handle_simple_assignment( 1, index[ 0 ][ 1:-1 ] )
-                self.copy_value_dynamic( tmp[ 0 ], var_index )
+            self.set_value( self.get_variable_index( name ), 0 )
+            self.move( tmp[ 0 ], self.get_variable_index( name ) )
+            self.empty_buff( tmp )
+        elif re.fullmatch( r"\w+\[\d+\] = .*", command ):
+            name_and_index, expression = re.split( ' = ', command, maxsplit=1 )
+            name, index = re.findall( r"\w+", name_and_index )[ 0 ], re.findall( r"\[\d+\]", name_and_index )[0]
+            tmp = self.get_buff( 1 )
+            handle_simple_assignment( tmp[ 0 ], expression )
+            self.set_value( self.get_variable_index( name ) + int( index[ 1:-1 ] ) * 2, 0 )
+            self.move( tmp[ 0 ], self.get_variable_index( name ) + int( index[ 1:-1 ] ) * 2 )
+            self.empty_buff( tmp )
+        elif re.fullmatch( r"\w+\[\w+\] = .*", command ):
+            name_and_index, expression = re.split( ' = ', command, maxsplit=1 )
+            name, index = re.findall( r"\w+", name_and_index )[ 0 ], re.findall( r"\[\w+\]", name_and_index )[0]
+            tmp = self.get_buff( 1 )
+            handle_simple_assignment( tmp[ 0 ], expression )
+            self.add_value( 1, self.get_variable_index( name )//2 )
+            self.clear_value_dynamic( self.get_variable_index( index[ 1:-1 ] ) )
+            self.add_value( 1, self.get_variable_index( name )//2 )
+            self.copy_value_dynamic( tmp[0], self.get_variable_index( index[ 1:-1 ] ) )
+            self.empty_buff( tmp )
+        elif re.fullmatch( r"\*\w+ = .*", command ):
+            name, expression = re.split( ' = ', command[ 1: ], maxsplit=1 )
+            tmp = self.get_buff( 1 )
+            handle_simple_assignment( tmp[ 0 ], expression )
+            self.clear_value_dynamic( self.get_variable_index( name ) )
+            self.copy_value_dynamic( tmp[ 0 ], self.get_variable_index( name ) )
+            self.empty_buff( tmp )
+        elif re.fullmatch( r"\*\w+\[\d+\] = .*", command ):
+            name_and_index, expression = re.split( ' = ', command, maxsplit=1 )
+            name, index = re.findall( r"\w+", name_and_index )[ 0 ], re.findall( r"\[\d+\]", name_and_index )[0]
+            tmp = self.get_buff( 1 )
+            handle_simple_assignment( tmp[ 0 ], expression )
+            self.add_value( 1, int( index[ 1:-1 ] ) )
+            self.clear_value_dynamic( self.get_variable_index( name ) )
+            self.add_value( 1, int( index[ 1:-1 ] ) )
+            self.copy_value_dynamic( tmp[0], self.get_variable_index( name ) )
+            self.empty_buff( tmp )
+        elif re.fullmatch( r"\*\w+\[\w+\] = .*", command ):
+            name_and_index, expression = re.split( ' = ', command, maxsplit=1 )
+            name, index = re.findall( r"\w+", name_and_index )[ 0 ], re.findall( r"\[\w+\]", name_and_index )[0]
+            tmp = self.get_buff( 1 )
+            handle_simple_assignment( tmp[ 0 ], expression )
+            self.copy( self.get_variable_index( name ), 1 )
+            self.clear_value_dynamic( self.get_variable_index( index[ 1:-1 ] ) )
+            self.copy( self.get_variable_index( name ), 1 )
+            self.copy_value_dynamic( tmp[0], self.get_variable_index( index[ 1:-1 ] ) )
             self.empty_buff( tmp )
         elif re.fullmatch( r"\w+ [\+\-\*/]= .*", command ):
             name, expression = re.split( r' [\+\-\*/]= ', command, maxsplit=1 )
             operation = re.findall( r' [\+\-\*/]= ', command )[ 0 ][ 1 ]
             tmp = self.get_buff( 1 )
             handle_simple_assignment( tmp[ 0 ], f"{name} {operation} {expression}")
-            self.set_value( var_index, 0 )
-            self.copy( tmp[ 0 ], var_index )
+            self.set_value( self.get_variable_index( name ), 0 )
+            self.copy( tmp[ 0 ], self.get_variable_index( name ) )
             self.empty_buff( tmp )
         elif re.fullmatch( r"if .+ \{.*\}", command ):
             cond, body = re.split( r' \{', command[ 3: ], maxsplit=1 )
@@ -197,11 +236,12 @@ class BD:
         elif re.fullmatch( r"while .+ \{.*\}", command ):
             cond, body = re.split( ' {', command[ 6: ], maxsplit=1 )
             body = body.rstrip( '}' )
-            tmp = self.get_buff()
+            tmp = self.get_buff( 1 )
             handle_simple_assignment( tmp[ 0 ], cond )
             self.cycle_while( tmp[ 0 ], [
-                [ self.execution, render_command ] for render_command in self.render_fragment( body.replace( cond, tmp ) )
+                [ self.execution, render_command ] for render_command in self.render_fragment( body )
             ] + [
+                [ self.set_value, tmp[0], 0 ],
                 [ handle_simple_assignment, tmp[ 0 ], cond ]
             ] )
             self.empty_buff( tmp )
@@ -304,6 +344,13 @@ class BD:
         self.code += '<-[>>>>[-<<+>>]<<<<+<<-]<'
         self.cursorPosition = 0
         self.move( 5, dst )
+
+    def clear_value_dynamic( self, index: int ) -> None:
+        self.copy( index, 1 )
+        self.set_cursor( 1 )
+        self.code += '-[->>+<<]+>>[-[->>+<<]>>]<'
+        self.code += '[-]'
+        self.exit_dynamic()
 
     def exit_dynamic( self ) -> None:
         self.code += '<-[+<<-]<'
