@@ -152,9 +152,9 @@ class BD:
                 size = int( re.findall( r"\d+", expression )[ 0 ] )
                 self.copy( 0, var_ind )
                 self.add_value( 0, size )
-            elif re.fullmatch( r"\*\w+\[\w+\]", expression ):
+            elif re.fullmatch( r"\*\w+", expression ):
                 name = expression[ 1: ]
-                #get_value_dynamic( self, self.get_variable_index( name ), var_ind )
+                self.get_value_dynamic( self.get_variable_index( name ), var_ind )
             else:
                 print( f"Выражение не обработано: \"{ expression }\"" )
         
@@ -297,18 +297,13 @@ class BD:
         self.code += '-[->>+<<]+>>>>[->>+<<]<<[-[->>+<<]>>>>[->>+<<]<<]>>>>[-<<<<<+>>>>>]<<<<<'
         self.exit_dynamic()
 
-    # def get_value_dynamic( self, src: int, dst: int ) -> None: # где-то ту ошибка
-    #     self.cursorIndex = 0
-    #     self.copy( src, 1 )
-    #     self.set_cursor( 1 )
-    #     self.add_value( -1 ) # мы передвигаемся на предыдущий
-    #     self.code+='$'
-    #     self.code += '-[->>+<<]+>>[-[->>+<<]>>] <[->+>>+<<<]<<' # просто передвегается на нужно количество ячеек
-    #     self.code += '<-[>>>>[-<<+>>]<<<<+<<-]<' # возвращаемся в начало и несём за собой копию значения из ячейки n + 3 в ячейку 5
-    #     self.move( 5, dst )
-    #     self.copy( src, 1 )
-    #     self.code += '-[->>+<<]+>>[-[->>+<<]>>]<   >>>[-<<<+>>>]<' # возвращаемся и перемещаем значение из n + 3 (буфер) в n
-    #     self.exit_dynamic()
+    def get_value_dynamic( self, src: int, dst: int ) -> None:
+        self.copy( src, 1 )
+        self.set_cursor( 1 )
+        self.code += '-[->>+<<]+>>[-[->>+<<]>>]<[->+<]>[<+<+>>-]<'
+        self.code += '<-[>>>>[-<<+>>]<<<<+<<-]<'
+        self.cursorPosition = 0
+        self.move( 5, dst )
 
     def exit_dynamic( self ) -> None:
         self.code += '<-[+<<-]<'
